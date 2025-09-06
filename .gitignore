@@ -1,0 +1,9 @@
+*.pyc
+.env
+chromadb/315e892b-0758-4ee0-ba63-b3457f2623da/data_level0.bin
+chromadb/315e892b-0758-4ee0-ba63-b3457f2623da/header.bin
+chromadb/315e892b-0758-4ee0-ba63-b3457f2623da/length.bin
+chromadb/315e892b-0758-4ee0-ba63-b3457f2623da/link_lists.bin
+chromadb/chroma.sqlite3
+media/pdfs/Stock_Market_Performance_2024.pdf
+/venv
