@@ -1,14 +1,15 @@
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from apps.chat.rag import graph, tools, pdfloader, build_graph
+from apps.chat.rag.router import RouterRetriever
 from config.logger import get_logger
 
 logger = get_logger(__name__)
 
 rag_agent = None
-
 
 def init_rag():
     """
@@ -23,6 +24,34 @@ def init_rag():
 
     load_dotenv() #loads data from .env file
 
+    BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+    prompt_path = BASE_DIR / "config" / "system_prompt.txt"
+
+    if prompt_path.exists():
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            SYSTEM_PROMPT = f.read()
+    else:
+        SYSTEM_PROMPT = """
+            You are FranzAI, a helpful and friendly financial assistant. 
+            You ONLY answer questions related to the Stock Market, and exchange listings based on the PDFs provided in your knowledge base. 
+
+            When responding:
+            - Speak in a conversational, natural way (like chatting with a colleague).
+            - if the user is just greeting or making small talk (e.g., 'hello', 'hi', 'how are you?', 'who are you?') respond politely without calling any tools
+            - Use plain language while keeping key details accurate. 
+            - If the document gives specific numbers, companies, or names, include them — but explain them in your own words.
+            - Avoid sounding like you're quoting the document directly. Summarize naturally.
+            - If the user asks something that is not about the stock market, exchange listings or outside the documents you have been provided, politely refuse and say something like: 
+            “I can only answer questions about the stock market, exchange listings based on the documents I have.”
+            - Only respond to the user's latest message.
+            - Use older messages only as supporting context if they are relevant.
+            - Do not repeat or re-answer earlier questions unless the user explicitly asks again.
+            - Do not perform unrelated tasks or answer off-topic questions.
+
+            Your goal: sound clear, natural, and human-like, while staying strictly grounded in the PDF's content.
+        """
+
     #Initialize the LLM
     llm_model = ChatGroq(model="openai/gpt-oss-120b", temperature=0)
 
@@ -31,23 +60,14 @@ def init_rag():
 
     #Inject into graph
     graph.llm_model = llm_model
-    graph.sys_prompt = os.getenv(
-        "SYSTEM_PROMPT",
-        """
-        You are a RAG agent with access to tools, who answers questions about Stock Market Performance in 2024 based on the PDF document loaded into your knowledge base.
-        Use the retriever tool available to answer questions about the stock market performance data. You can make multiple calls if needed.
-        If you need to look up some information before asking a follow up question, you are allowed to do that!
-        Please always cite the specific parts of the documents you use in your answers.
-        Answer clearly and concisely.
-        You will NOT perform any other task or answer any question NOT related to the Stock Market Performance PDF.
-        """
-    )
+
+    graph.sys_prompt = SYSTEM_PROMPT
 
     graph.tools_dict = tools.tools_dict
 
-    #Initialize retriever
-    retriever = pdfloader.init_retriever()
-    tools.retriever = retriever
+    #Initialize retrievers
+    listing_retriever, market_retriever = pdfloader.init_retriever()
+    tools.retriever = RouterRetriever(listing_retriever, market_retriever, logger)
 
     #Build the graph
     rag_agent = build_graph.init_graph()
@@ -55,7 +75,7 @@ def init_rag():
     logger.info("RAG agent initialization complete")
 
 
-def run_agent(user_input: str) -> str:
+def run_agent(previous_messages, user_input: str) -> str:
     """
         This runs the agent.
         Args:
@@ -68,8 +88,19 @@ def run_agent(user_input: str) -> str:
     if rag_agent is None:
         raise RuntimeError("Agent not initialized. Call init_rag() first.")
     
+    #Convert DB messages to Langchain Mesages
+    message_history = []
+
+    for msg in previous_messages:
+        if msg.role == "user":
+            message_history.append(HumanMessage(content=msg.content))
+        else:
+            message_history.append(AIMessage(content=msg.content))
+    
+    message_history.append(HumanMessage(content=user_input))
+    logger.info(f"last appended message: {message_history[-1].content}")
     state = {
-        "messages" : [HumanMessage(content=user_input)],
+        "messages" : message_history[-10:],
         "tool_call_count": 0,
     }
 

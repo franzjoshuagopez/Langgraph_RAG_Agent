@@ -3,7 +3,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
 from apps.chat.rag.agent import run_agent, init_rag
+from apps.chat.models import ChatMessage
 from config.logger import get_logger
+
 
 logger = get_logger(__name__)
 
@@ -32,8 +34,29 @@ def send_message(request):
 
             data = json.loads(request.body) #parse request to JSON format
             user_input = data.get("message", "")
+
+            #using session key to keep track of chat history since web app currently has no user management system
+            session_id = request.session.session_key
+            if not session_id:
+                request.session.create()
+                session_id = request.session.session_key
+
+            #append user message to database
+            ChatMessage.objects.create(
+                session_id=session_id,
+                role="user",
+                content=user_input
+            )
+
+            #Read message history from database where session id of browser is = session id of db row
+            previous_messages = ChatMessage.objects.filter(
+                session_id=session_id,
+            ).order_by("timestamp")
+
+
             logger.info("calling RAG agent")
-            response = run_agent(user_input) # call RAG agent
+            logger.info(f"user input: {user_input}")
+            response = run_agent(previous_messages, user_input) # call RAG agent
             logger.info("RAG agent responded")
 
             return JsonResponse({"reply" : response})

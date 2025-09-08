@@ -7,3 +7,6 @@ chromadb/315e892b-0758-4ee0-ba63-b3457f2623da/link_lists.bin
 chromadb/chroma.sqlite3
 media/pdfs/Stock_Market_Performance_2024.pdf
 /venv
+db.sqlite3
+/chromadb/market_db
+/chromadb/listing_db

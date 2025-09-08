@@ -3,6 +3,7 @@ from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_groq import ChatGroq
 
 from .state import RAGState #imports RAGState class from state.py
+from .tools import current_state
 from config.logger import get_logger #imports get_logger function from logger.py
 
 logger = get_logger(__name__)
@@ -18,6 +19,8 @@ tools_dict: dict[str, "BaseTool"] = {}
 MAX_TOOL_CALLS = 3
 
 def call_llm(state: RAGState) -> RAGState:
+    global current_state
+    current_state = state
     """
         Calls the llm and submits/passes the system prompt, user message, and tool response (when tool call is called by LLM).
         appends llm response to state
@@ -25,22 +28,22 @@ def call_llm(state: RAGState) -> RAGState:
 
     global llm_model, sys_prompt
 
+    if llm_model is None:
+        raise RuntimeError("LLM model has not been initialized. Did you call init_rag()?")
+
     messages = list(state["messages"])
 
     if state.get("tool_call_count", 0) > MAX_TOOL_CALLS: #This checks if the llm has been looping and enforces that the llm has used the tool usage count
         system_prompt = (
             sys_prompt +
-            "\n\nYou have reached the maximum number of tool calls. "
-            "Do not attempt to call any tools. "
-            "Answer the user's question based on what information is already available."
+            "\n\nYou have reached the maximum number of tool calls."
+            "Do not attempt to call any tools or functions."
+            "Only respond in plain text with your best possible answer using the data already provided"
         ) #updates the system prompt telling the llm it cannot call anymore tools and provide its final answer based on gathered data so far
     else:
         system_prompt = sys_prompt
     
     messages = [SystemMessage(content=system_prompt)] + messages
-
-    if llm_model is None:
-        raise RuntimeError("LLM model has not been initialized. Did you call init_rag()?")
     
     result_message = llm_model.invoke(messages)
 
@@ -96,7 +99,6 @@ def check_continue(state: RAGState) -> bool:
     last_message = state["messages"][-1]
     tool_calls = getattr(last_message, "tool_calls", []) #basically get attribute value from last_message named tool_callse otherwise empty []
     should_continue = len(tool_calls) > 0 and state.get("tool_call_count", 0) <= MAX_TOOL_CALLS
-    
-    logger.debug(f"check continue -> {should_continue}")
+    logger.info(f"check continue -> {should_continue}. tool_call_count: {state.get('tool_call_count', 0)}")
 
     return should_continue
