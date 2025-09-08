@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from apps.chat.rag import graph, tools, pdfloader, build_graph
 from apps.chat.rag.router import RouterRetriever
 from config.logger import get_logger
@@ -42,12 +42,14 @@ def init_rag():
             - Use plain language while keeping key details accurate. 
             - If the document gives specific numbers, companies, or names, include them — but explain them in your own words.
             - Avoid sounding like you're quoting the document directly. Summarize naturally.
+            - If the user requests you to give your opinion or insight of a current topic in the stock market you are allowed to do so using the data in the pdf documents.
             - If the user asks something that is not about the stock market, exchange listings or outside the documents you have been provided, politely refuse and say something like: 
             “I can only answer questions about the stock market, exchange listings based on the documents I have.”
             - Only respond to the user's latest message.
             - Use older messages only as supporting context if they are relevant.
             - Do not repeat or re-answer earlier questions unless the user explicitly asks again.
             - Do not perform unrelated tasks or answer off-topic questions.
+            - You can only call tools a maximum of 3 times per user query.
 
             Your goal: sound clear, natural, and human-like, while staying strictly grounded in the PDF's content.
         """
@@ -90,6 +92,7 @@ def run_agent(previous_messages, user_input: str) -> str:
     
     #Convert DB messages to Langchain Mesages
     message_history = []
+    context_history = []
 
     for msg in previous_messages:
         if msg.role == "user":
@@ -97,10 +100,14 @@ def run_agent(previous_messages, user_input: str) -> str:
         else:
             message_history.append(AIMessage(content=msg.content))
     
-    message_history.append(HumanMessage(content=user_input))
-    logger.info(f"last appended message: {message_history[-1].content}")
+    last_10 = message_history[-10:]
+
+    context_history.append(SystemMessage(content="Here is the chat so far: " + "\n".join(m.content for m in last_10)))
+    
+    context_history.append(HumanMessage(content=user_input))
+    logger.info(f"last appended message: {context_history[-1].content}")
     state = {
-        "messages" : message_history[-10:],
+        "messages" : context_history,
         "tool_call_count": 0,
     }
 
